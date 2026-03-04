@@ -1,6 +1,17 @@
 #!/bin/bash
 #set -e
 
+# Seed writable volumes from image snapshots if they are empty.
+# This allows running with readOnlyRootFilesystem: true in Kubernetes
+# by mounting emptyDir volumes at conf/, webapps/draw/js/ and webapps/draw/WEB-INF/.
+for dir in conf webapps/draw/js webapps/draw/WEB-INF; do
+    target="$CATALINA_HOME/$dir"
+    src_key=$(basename "$dir")
+    if [ -z "$(ls -A $target 2>/dev/null)" ]; then
+        cp -r /opt/drawio-defaults/$src_key/. $target/
+    fi
+done
+
 LETS_ENCRYPT_ENABLED=${LETS_ENCRYPT_ENABLED:-false}
 PUBLIC_DNS=${PUBLIC_DNS:-'draw.example.com'}
 ORGANISATION_UNIT=${ORGANISATION_UNIT:-'Cloud Native Application'}
@@ -149,34 +160,34 @@ echo "App.prototype.isDriveDomain = function() { return true; }" >> $CATALINA_HO
 
 cat $CATALINA_HOME/webapps/draw/js/PostConfig.js
 
-if ! [ -f $CATALINA_HOME/.keystore ] && [ "$LETS_ENCRYPT_ENABLED" == "true" ]; then
-    echo "Generating Let's Encrypt certificate"
-    
-    keytool -genkey -noprompt -alias tomcat -dname "CN=${PUBLIC_DNS}, OU=${ORGANISATION_UNIT}, O=${ORGANISATION}, L=${CITY}, S=${STATE}, C=${COUNTRY_CODE}" -keystore $CATALINA_HOME/.keystore -storepass "${KEYSTORE_PASS}" -KeySize 2048 -keypass "${KEY_PASS}" -keyalg RSA -storetype pkcs12
+KEYSTORE_FILE=$CATALINA_HOME/ssl/.keystore
 
-    keytool -list -keystore $CATALINA_HOME/.keystore -v -storepass "${KEYSTORE_PASS}"
+if ! [ -f "$KEYSTORE_FILE" ]; then
+    if [ "$LETS_ENCRYPT_ENABLED" == "true" ]; then
+        echo "Generating Let's Encrypt certificate"
 
-    keytool -certreq -alias tomcat -file request.csr -keystore $CATALINA_HOME/.keystore -storepass "${KEYSTORE_PASS}"
+        keytool -genkey -noprompt -alias tomcat -dname "CN=${PUBLIC_DNS}, OU=${ORGANISATION_UNIT}, O=${ORGANISATION}, L=${CITY}, S=${STATE}, C=${COUNTRY_CODE}" -keystore $KEYSTORE_FILE -storepass "${KEYSTORE_PASS}" -KeySize 2048 -keypass "${KEY_PASS}" -keyalg RSA -storetype pkcs12
 
-    certbot certonly --csr $CATALINA_HOME/request.csr --standalone --register-unsafely-without-email --agree-tos
+        keytool -list -keystore $KEYSTORE_FILE -v -storepass "${KEYSTORE_PASS}"
 
-    keytool -import -trustcacerts -alias tomcat -file 0001_chain.pem -keystore $CATALINA_HOME/.keystore -storepass "${KEYSTORE_PASS}"
-fi
+        keytool -certreq -alias tomcat -file request.csr -keystore $KEYSTORE_FILE -storepass "${KEYSTORE_PASS}"
 
-if ! [ -f $CATALINA_HOME/.keystore ] && [ "$LETS_ENCRYPT_ENABLED" == "false" ]; then
-    echo "Generating Self-Signed certificate"
+        certbot certonly --csr $CATALINA_HOME/request.csr --standalone --register-unsafely-without-email --agree-tos
 
-    keytool -genkey -noprompt -alias selfsigned -dname "CN=${PUBLIC_DNS}, OU=${ORGANISATION_UNIT}, O=${ORGANISATION}, L=${CITY}, S=${STATE}, C=${COUNTRY_CODE}" -keystore $CATALINA_HOME/.keystore -storepass "${KEYSTORE_PASS}" -KeySize 2048 -keypass "${KEY_PASS}" -keyalg RSA -validity 3600 -storetype pkcs12
-    
-    keytool -list -keystore $CATALINA_HOME/.keystore -v -storepass "${KEYSTORE_PASS}"
+        keytool -import -trustcacerts -alias tomcat -file 0001_chain.pem -keystore $KEYSTORE_FILE -storepass "${KEYSTORE_PASS}"
+    else
+        echo "Generating Self-Signed certificate"
+
+        keytool -genkey -noprompt -alias selfsigned -dname "CN=${PUBLIC_DNS}, OU=${ORGANISATION_UNIT}, O=${ORGANISATION}, L=${CITY}, S=${STATE}, C=${COUNTRY_CODE}" -keystore $KEYSTORE_FILE -storepass "${KEYSTORE_PASS}" -KeySize 2048 -keypass "${KEY_PASS}" -keyalg RSA -validity 3600 -storetype pkcs12
+
+        keytool -list -keystore $KEYSTORE_FILE -v -storepass "${KEYSTORE_PASS}"
+    fi
 fi
 
 # Update SSL port configuration if it does'nt exists
 #
-UUID="$(cat /dev/urandom | tr -dc 'a-zA-Z' | fold -w 1 | head -n 1)$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 7 | head -n 1)"
-VAR=$(cat conf/server.xml | grep "$CATALINA_HOME/.keystore")
-
-if [ -f $CATALINA_HOME/.keystore ] && [ -z $VAR ]; then
+UUID=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 8)
+if [ -f "$KEYSTORE_FILE" ] && ! grep -q "$KEYSTORE_FILE" conf/server.xml; then
      echo "Append https connector to server.xml"
 
     xmlstarlet ed \
@@ -190,14 +201,14 @@ if [ -f $CATALINA_HOME/.keystore ] && [ -z $VAR ]; then
         -i "/Server/Service/${UUID}" -t 'attr' -n 'secure' -v 'true' \
         -i "/Server/Service/${UUID}" -t 'attr' -n 'clientAuth' -v 'false' \
         -i "/Server/Service/${UUID}" -t 'attr' -n 'sslProtocol' -v 'TLS' \
-        -i "/Server/Service/${UUID}" -t 'attr' -n 'KeystoreFile' -v "$CATALINA_HOME/.keystore" \
+        -i "/Server/Service/${UUID}" -t 'attr' -n 'KeystoreFile' -v "$KEYSTORE_FILE" \
         -i "/Server/Service/${UUID}" -t 'attr' -n 'KeystorePass' -v "${KEY_PASS}" \
         -i "/Server/Service/${UUID}" -t 'attr' -n 'defaultSSLHostConfigName' -v "${PUBLIC_DNS:-'draw.example.com'}" \
         -s "/Server/Service/${UUID}" -t 'elem' -n 'SSLHostConfig' \
         -i "/Server/Service/${UUID}/SSLHostConfig" -t 'attr' -n 'hostName' -v "${PUBLIC_DNS:-'draw.example.com'}" \
         -i "/Server/Service/${UUID}/SSLHostConfig" -t 'attr' -n 'protocols' -v 'TLSv1.2' \
         -s "/Server/Service/${UUID}/SSLHostConfig" -t 'elem' -n 'Certificate' \
-        -i "/Server/Service/${UUID}/SSLHostConfig/Certificate" -t 'attr' -n 'certificateKeystoreFile' -v "$CATALINA_HOME/.keystore" \
+        -i "/Server/Service/${UUID}/SSLHostConfig/Certificate" -t 'attr' -n 'certificateKeystoreFile' -v "$KEYSTORE_FILE" \
         -i "/Server/Service/${UUID}/SSLHostConfig/Certificate" -t 'attr' -n 'certificateKeystorePassword' -v "${KEY_PASS}" \
         -r "/Server/Service/${UUID}" -v 'Connector' \
     conf/server.xml

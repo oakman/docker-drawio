@@ -1,0 +1,61 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      PUID:
+        description: "User ID to run the container as"
+        default: "11000"
+      PGID:
+        description: "Group ID to run the container as"
+        default: "11000"
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR (for build cache)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: main/
+          platforms: linux/amd64
+          outputs: type=docker,dest=/tmp/drawio.tar
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-cache,mode=max
+          build-args: |
+            PUID=${{ inputs.PUID || 11000 }}
+            PGID=${{ inputs.PGID || 11000 }}
+          tags: drawio:ci
+
+      - name: Smoke test
+        run: |
+          docker load --input /tmp/drawio.tar
+          docker run --name drawio -d -p 8080:8080 drawio:ci
+          sleep 15
+          docker logs drawio
+          docker exec drawio curl -sf http://localhost:8080
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drawio-image
+          path: /tmp/drawio.tar
+          retention-days: 1

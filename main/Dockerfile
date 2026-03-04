@@ -20,6 +20,8 @@ LABEL maintainer="draw.io Ltd" \
       org.opencontainers.image.url="https://www.drawio.com" \
       org.opencontainers.image.source="https://github.com/jgraph/docker-drawio"
 
+ARG PUID=11000
+ARG PGID=11000
 ENV RUN_USER            tomcat
 ENV RUN_GROUP           tomcat
 
@@ -51,9 +53,15 @@ RUN mkdir -p $CATALINA_HOME/webapps/draw && \
 # Copy docker-entrypoint
 COPY docker-entrypoint.sh /
 RUN chmod 755 /docker-entrypoint.sh
-# Add a tomcat user
-RUN groupadd -r ${RUN_GROUP} && useradd -g ${RUN_GROUP} -d ${CATALINA_HOME} -s /bin/bash ${RUN_USER} && \
-    chown -R ${RUN_USER}:${RUN_GROUP} ${CATALINA_HOME}
+# Add a tomcat user, create ssl dir and snapshot directories that will be
+# mounted as writable emptyDir volumes in Kubernetes. The entrypoint seeds
+# the volumes from these snapshots on first start.
+RUN groupadd -g ${PGID} ${RUN_GROUP} && useradd -u ${PUID} -g ${RUN_GROUP} -d ${CATALINA_HOME} -s /bin/bash ${RUN_USER} && \
+    mkdir -p ${CATALINA_HOME}/ssl && \
+    cp -r ${CATALINA_HOME}/conf /opt/drawio-defaults/conf && \
+    cp -r ${CATALINA_HOME}/webapps/draw/js /opt/drawio-defaults/js && \
+    cp -r ${CATALINA_HOME}/webapps/draw/WEB-INF /opt/drawio-defaults/WEB-INF && \
+    chown -R ${RUN_USER}:${RUN_GROUP} ${CATALINA_HOME} /opt/drawio-defaults
 
 USER ${RUN_USER}
 
