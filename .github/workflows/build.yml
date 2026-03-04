@@ -38,8 +38,8 @@ jobs:
           context: main/
           platforms: linux/amd64
           outputs: type=docker,dest=/tmp/drawio.tar
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-cache,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/drawio-cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/drawio-cache,mode=max
           build-args: |
             PUID=${{ inputs.PUID || 11000 }}
             PGID=${{ inputs.PGID || 11000 }}

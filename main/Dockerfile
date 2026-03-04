@@ -1,4 +1,4 @@
-FROM eclipse-temurin:11-jdk-jammy AS build
+FROM eclipse-temurin:25-jdk-jammy AS build
 
 RUN apt-get update -y && \
 # this solves some weird issue with openjdk-11-jdk-headless
@@ -13,7 +13,7 @@ RUN cd /tmp && \
     cd /tmp/drawio/etc/build/ && \
     ant war
 
-FROM tomcat:9.0-jdk11-temurin
+FROM tomcat:10.1.52-jdk25-temurin
 
 LABEL maintainer="draw.io Ltd" \
       org.opencontainers.image.authors="draw.io Ltd" \
@@ -57,7 +57,7 @@ RUN chmod 755 /docker-entrypoint.sh
 # mounted as writable emptyDir volumes in Kubernetes. The entrypoint seeds
 # the volumes from these snapshots on first start.
 RUN groupadd -g ${PGID} ${RUN_GROUP} && useradd -u ${PUID} -g ${RUN_GROUP} -d ${CATALINA_HOME} -s /bin/bash ${RUN_USER} && \
-    mkdir -p ${CATALINA_HOME}/ssl && \
+    mkdir -p ${CATALINA_HOME}/ssl /opt/drawio-defaults && \
     cp -r ${CATALINA_HOME}/conf /opt/drawio-defaults/conf && \
     cp -r ${CATALINA_HOME}/webapps/draw/js /opt/drawio-defaults/js && \
     cp -r ${CATALINA_HOME}/webapps/draw/WEB-INF /opt/drawio-defaults/WEB-INF && \

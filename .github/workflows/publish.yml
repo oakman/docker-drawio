@@ -54,7 +54,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/${{ github.repository_owner }}/drawio
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-
@@ -67,7 +67,7 @@ jobs:
           context: main/
           platforms: linux/amd64,linux/arm64
           push: true
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-cache
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/drawio-cache
           build-args: |
             PUID=${{ inputs.PUID || 11000 }}
             PGID=${{ inputs.PGID || 11000 }}
